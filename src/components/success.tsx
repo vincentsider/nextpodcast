@@ -21,78 +21,41 @@ To read more about using these font, please visit the Next.js documentation:
 
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
 export function Success() {
   const searchParams = useSearchParams();
-  const audioUrl = searchParams?.get('audioUrl');
+  const audioUrl = searchParams?.get('audioUrl') || '';
+
+  const handleDownload = () => {
+    if (audioUrl) {
+      // Create a temporary anchor element
+      const link = document.createElement('a');
+      link.href = audioUrl;
+      link.download = `podcast.mp3`; // Set the filename
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
 
   return (
-    <div className="flex flex-col min-h-[100dvh]">
-      <header className="bg-background border-b px-4 md:px-6 h-14 flex items-center justify-between">
-        <Link href="#" className="flex items-center" prefetch={false}>
-          <PodcastIcon className="h-6 w-6 mr-2" />
-          <span className="text-lg font-semibold">Podcast Generator</span>
-        </Link>
-        <nav className="hidden md:flex gap-4">
-          <Link href="#" className="text-sm font-medium hover:underline" prefetch={false}>
-            Home
-          </Link>
-          <Link href="#" className="text-sm font-medium hover:underline" prefetch={false}>
-            About
-          </Link>
-          <Link href="#" className="text-sm font-medium hover:underline" prefetch={false}>
-            Contact
-          </Link>
-        </nav>
-      </header>
-      <main className="flex-1 flex flex-col items-center justify-center px-4 md:px-6 py-12 md:py-24">
-        <div className="max-w-xl w-full space-y-6">
-          <div className="text-center">
-            <h1 className="text-3xl md:text-4xl font-bold">Your Podcast is Ready!</h1>
-            <p className="mt-2 text-muted-foreground">Your podcast has been generated and is available for download.</p>
-          </div>
-          <Card>
-            <CardHeader>
-              <CardTitle>Download Your Podcast</CardTitle>
-              <CardDescription>Click the button below to download your podcast in MP3 format.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col items-center justify-center gap-4 py-12">
-                <DownloadIcon className="h-12 w-12 text-muted-foreground" />
-                <p className="text-muted-foreground">Your podcast is ready to download.</p>
-              </div>
-            </CardContent>
-            <CardFooter>
-              {audioUrl ? (
-                <a href={audioUrl} download>
-                  <Button>Download Podcast</Button>
-                </a>
-              ) : (
-                <p>No podcast available for download.</p>
-              )}
-            </CardFooter>
-          </Card>
-          <div className="text-center">
-            <p className="text-muted-foreground">You can also share the download link with your audience.</p>
-          </div>
+    <div className="flex flex-col min-h-screen items-center justify-center bg-background text-foreground">
+      <div className="text-center space-y-4">
+        <button onClick={handleDownload} className="cursor-pointer">
+          <DownloadIcon className="h-24 w-24 text-primary mx-auto" />
+        </button>
+        <h1 className="text-3xl font-bold">Your Podcast is Ready to Download</h1>
+        <p className="text-muted-foreground">Click the icon above to download your podcast.</p>
+        <div className="flex justify-center space-x-4 mt-8">
+          <Button asChild>
+            <Link href="/">Generate New Podcast</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/">Back to Home</Link>
+          </Button>
         </div>
-      </main>
-      <footer className="bg-muted px-4 md:px-6 py-6 flex flex-col md:flex-row items-center justify-between">
-        <p className="text-sm text-muted-foreground">&copy; 2024 Podcast Generator. All rights reserved.</p>
-        <div className="flex gap-4 mt-4 md:mt-0">
-          <Link href="#" className="text-sm hover:underline" prefetch={false}>
-            Privacy Policy
-          </Link>
-          <Link href="#" className="text-sm hover:underline" prefetch={false}>
-            Terms of Service
-          </Link>
-          <Link href="#" className="text-sm hover:underline" prefetch={false}>
-            Contact Us
-          </Link>
-        </div>
-      </footer>
+      </div>
     </div>
   );
 }
@@ -114,28 +77,6 @@ function DownloadIcon(props: React.SVGProps<SVGSVGElement>) {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" x2="12" y1="15" y2="3" />
-    </svg>
-  );
-}
-
-function PodcastIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M16.85 18.58a9 9 0 1 0-9.7 0" />
-      <path d="M8 14a5 5 0 1 1 8 0" />
-      <circle cx="12" cy="11" r="1" />
-      <path d="M13 17a1 1 0 1 0-2 0l.5 4.5a.5.5 0 1 0 1 0Z" />
     </svg>
   );
 }

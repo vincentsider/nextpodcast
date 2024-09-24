@@ -19,21 +19,40 @@ To read more about using these font, please visit the Next.js documentation:
 **/
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { UrlObject } from 'url';
 
 export function PodcastCreator() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const router = useRouter();
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setFile(event.target.files ? event.target.files[0] : null);
   };
+
+  const handleDrag = useCallback((e: React.DragEvent<HTMLFormElement | HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLFormElement | HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      setFile(e.dataTransfer.files[0]);
+    }
+  }, []);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -51,12 +70,14 @@ export function PodcastCreator() {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ article: text }),
+          body: JSON.stringify({ 
+            article: text
+          }),
         });
 
         const data = await response.json();
         if (response.ok) {
-          const audioUrl = data.audioUrl; // Ensure this is the correct property
+          const audioUrl = data.audioUrl;
           router.push(`/success?audioUrl=${encodeURIComponent(audioUrl)}`);
         } else {
           console.error(data.error);
@@ -103,16 +124,35 @@ export function PodcastCreator() {
               <CardDescription>Drag and drop your file or click to select.</CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit} className="flex flex-col items-center justify-center gap-4 py-12 border-2 border-dashed border-muted rounded-md">
-                <UploadIcon className="h-12 w-12 text-muted-foreground" />
-                <p className="text-muted-foreground">
-                  Drag and drop your file here or{" "}
-                  <Button variant="link" className="underline" onClick={() => document.getElementById('fileInput')?.click()}>
-                    click to upload
-                  </Button>
-                </p>
-                <input type="file" id="fileInput" className="hidden" onChange={handleFileChange} />
-                <Button type="submit" disabled={loading}>
+              <form
+                onSubmit={handleSubmit}
+                onDragEnter={handleDrag}
+                className="flex flex-col items-center justify-center gap-4 py-12 border-2 border-dashed border-muted rounded-md"
+              >
+                <div
+                  className={`w-full h-full flex flex-col items-center justify-center ${dragActive ? 'bg-muted' : ''}`}
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                >
+                  <UploadIcon className="h-12 w-12 text-muted-foreground" />
+                  <p className="text-muted-foreground">
+                    Drag and drop your file here or{" "}
+                    <Button variant="link" className="underline" onClick={() => document.getElementById('fileInput')?.click()}>
+                      click to upload
+                    </Button>
+                  </p>
+                  <input
+                    type="file"
+                    id="fileInput"
+                    className="hidden"
+                    onChange={handleFileChange}
+                    accept=".txt,.doc,.docx,.pdf"
+                  />
+                  {file && <p className="mt-2">Selected file: {file.name}</p>}
+                </div>
+                <Button type="submit" disabled={loading || !file}>
                   {loading ? 'Generating...' : 'Generate Podcast'}
                 </Button>
               </form>
@@ -178,8 +218,8 @@ function UploadIcon(props: React.SVGProps<SVGSVGElement>) {
       strokeLinejoin="round"
     >
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="17 8 12 3 7 8" />
-      <line x1="12" x2="12" y1="3" y2="15" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" x2="12" y1="15" y2="3" />
     </svg>
   );
 }

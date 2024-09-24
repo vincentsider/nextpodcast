@@ -29,60 +29,106 @@ const systemPrompt = `you are an experienced podcast host...
 
 // Map speakers to specific voice IDs
 const speakerVoiceMap = {
-  Vincent: '7hI1gJ0eEcjxMNxBGItz', // Replace with Vincent's voice ID
-  Marina: '9BWtsMINqrJLrRacOk9x', // Replace with Marina's voice ID
+  Vincent: 'bIHbv24MWmeRgasZH58o', // Replace with Vincent's voice ID
+  Marina: 'Xb7hH8MSUJpSbSDYk0k2', // Replace with Marina's voice ID
 };
 
-// Function to generate the conversation using OpenAI
+// Updated function to generate the conversation using OpenAI
 async function generateConversation(article) {
-  const response = await openai.chat.completions.create({
-    model: 'gpt-4',
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: article }
-    ],
-    max_tokens: 2048,
-    temperature: 1,
-    top_p: 0.95,
-    n: 1,
-  });
+  console.log("Generating conversation...");
+  try {
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: article }
+      ],
+      max_tokens: 3500, // Increased max_tokens to allow longer responses
+      temperature: 1,
+      top_p: 0.95,
+      n: 1,
+    });
 
-  const conversationText = response.choices[0].message.content.trim();
-  const conversation = [];
+    const conversationText = response.choices[0].message.content.trim();
+    console.log("Received conversation text:", conversationText);
 
-  for (const line of conversationText.split('\n')) {
-    if (line.startsWith('Vincent:')) {
-      conversation.push({ speaker: 'Vincent', text: line.slice('Vincent:'.length).trim() });
-    } else if (line.startsWith('Marina:')) {
-      conversation.push({ speaker: 'Marina', text: line.slice('Marina:'.length).trim() });
+    const conversation = [];
+
+    for (const line of conversationText.split('\n')) {
+      if (line.startsWith('Vincent:')) {
+        conversation.push({ speaker: 'Vincent', text: line.slice('Vincent:'.length).trim() });
+      } else if (line.startsWith('Marina:')) {
+        conversation.push({ speaker: 'Marina', text: line.slice('Marina:'.length).trim() });
+      }
     }
+
+    console.log("Parsed conversation:", conversation);
+
+    if (conversation.length === 0) {
+      throw new Error("Conversation is empty.");
+    }
+
+    return conversation;
+  } catch (error) {
+    console.error("Failed to generate conversation:", error);
+    throw error; // Rethrow error to be caught in the handler
   }
-  return conversation;
 }
 
-// Function to synthesize speech using ElevenLabs
+// Updated synthesizeSpeech function
 async function synthesizeSpeech(text, speaker, filePath) {
   const voiceId = speakerVoiceMap[speaker];
-  const data = {
-    text: text,
-    model_id: 'eleven_turbo_v2_5',
-    voice_settings: {
-      stability: 0.5,
-      similarity_boost: 0.75,
-    },
-  };
 
-  const response = await axios.post(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, data, {
-    headers: {
-      Accept: 'audio/mpeg',
-      'Content-Type': 'application/json',
-      'xi-api-key': elevenlabsApiKey,
-    },
-    responseType: 'arraybuffer',
-  });
+  // Adjust max chunk size if necessary
+  const maxChunkSize = 500; // ElevenLabs may have a limit
+  const textChunks =
+    text.length > maxChunkSize
+      ? text.match(new RegExp(`.{1,${maxChunkSize}}`, 'g'))
+      : [text];
 
-  fs.writeFileSync(filePath, response.data);
-  console.log(`Audio content written to file "${filePath}"`);
+  const audioBuffers = [];
+
+  try {
+    for (const [index, chunk] of textChunks.entries()) {
+      console.log(`Synthesizing chunk ${index + 1}/${textChunks.length} for ${speaker}`);
+
+      const data = {
+        text: chunk,
+        model_id: 'eleven_monolingual_v1', // Ensure model_id is correct
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      };
+
+      const response = await axios.post(
+        `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+        data,
+        {
+          headers: {
+            Accept: 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': elevenlabsApiKey,
+          },
+          responseType: 'arraybuffer',
+        }
+      );
+
+      audioBuffers.push(Buffer.from(response.data));
+    }
+
+    // Concatenate all audio buffers
+    const combinedBuffer = Buffer.concat(audioBuffers);
+
+    fs.writeFileSync(filePath, combinedBuffer);
+    console.log(`Audio content written to file "${filePath}"`);
+  } catch (error) {
+    console.error(
+      `Failed to synthesize speech for ${speaker}:`,
+      error.response ? error.response.data : error.message
+    );
+    throw error;
+  }
 }
 
 // Function to merge audio files by concatenating buffers
@@ -135,17 +181,21 @@ async function generateAudio(conversation, directoryPath, dateHour) {
     const { speaker, text } = part;
     const filename = `${index}_${speaker}.mp3`;
     const filePath = path.join(directoryPath, filename);
+    console.log(`Synthesizing speech for ${speaker}, saving to ${filePath}`);
     await synthesizeSpeech(text, speaker, filePath);
     audioSegmentFiles.push(filePath);
   }
 
   // Name the output MP3 file
-  const outputFileName = `podcast${dateHour}.mp3`;
+  const outputFileName = `podcast_${dateHour}_${Math.random().toString(36).substr(2, 9)}.mp3`;
   const outputFilePath = path.join(directoryPath, outputFileName);
 
   await mergeAudios(audioSegmentFiles, outputFilePath);
+
+  return outputFileName;
 }
 
+// In the handler function, ensure errors are caught and logged
 export default async function handler(req, res) {
   if (req.method === 'POST') {
     const { article } = req.body;
@@ -154,32 +204,34 @@ export default async function handler(req, res) {
       // Generate the conversation using OpenAI
       const conversation = await generateConversation(article);
 
-      // Generate the date-hour format string (YYMMDDHH)
-      const date = new Date();
-      const dateHour = date
-        .toISOString()
-        .replace(/[-:T]/g, '')
-        .slice(2, 10);
-
-      // Define the directory path for this generation
-      const directoryPath = path.join(process.cwd(), 'public', 'podcasts', dateHour);
-
-      // Create the directory if it doesn't exist
-      if (!fs.existsSync(directoryPath)) {
-        fs.mkdirSync(directoryPath, { recursive: true });
+      // Check if the conversation is empty
+      if (!conversation.length) {
+        throw new Error("No conversation generated.");
       }
 
+      // Generate unique folder name with date and time
+      const date = new Date();
+      const dateHourMinuteSecond = date
+        .toISOString()
+        .replace(/[-:T.Z]/g, '')
+        .slice(2, 15);
+
+      // Define the directory path for this generation
+      const directoryPath = path.join(process.cwd(), 'public', 'podcasts', dateHourMinuteSecond);
+
+      // Create the directory
+      fs.mkdirSync(directoryPath, { recursive: true });
+
       // Generate the podcast audio and save files in the directory
-      await generateAudio(conversation, directoryPath, dateHour);
+      const outputFileName = await generateAudio(conversation, directoryPath, dateHourMinuteSecond);
 
       // Construct the audio URL
-      const outputFileName = `podcast${dateHour}.mp3`;
-      const audioUrl = `/podcasts/${dateHour}/${outputFileName}`;
+      const audioUrl = `/podcasts/${dateHourMinuteSecond}/${outputFileName}`;
 
       res.status(200).json({ message: 'Podcast generated successfully', audioUrl });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: 'Failed to generate podcast' });
+      console.error("Error in handler:", error);
+      res.status(500).json({ error: 'Failed to generate podcast', details: error.message });
     }
   } else {
     res.status(405).json({ error: 'Method not allowed' });
