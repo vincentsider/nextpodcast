@@ -7,6 +7,12 @@ import OpenAI from 'openai';
 const elevenlabsApiKey = process.env.ELEVENLABS_API_KEY;
 const openaiApiKey = process.env.OPENAI_API_KEY;
 
+// Check if environment variables are loaded
+if (!elevenlabsApiKey || !openaiApiKey) {
+  console.error("Environment variables ELEVENLABS_API_KEY or OPENAI_API_KEY are not set.");
+  process.exit(1);
+}
+
 // Set up OpenAI configuration
 const openai = new OpenAI({
   apiKey: openaiApiKey,
