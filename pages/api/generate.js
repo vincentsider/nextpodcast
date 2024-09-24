@@ -2,6 +2,20 @@ import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import OpenAI from 'openai';
+import axiosRetry from 'axios-retry';
+
+// Configure axios to use axios-retry
+axiosRetry(axios, {
+  retries: 3,
+  retryDelay: axiosRetry.exponentialDelay,
+  retryCondition: (error) => {
+    // Retry on rate limit or network errors
+    return (
+      axiosRetry.isNetworkOrIdempotentRequestError(error) ||
+      error.response.status === 429
+    );
+  },
+});
 
 // Load environment variables
 const elevenlabsApiKey = process.env.ELEVENLABS_API_KEY;
@@ -19,18 +33,25 @@ const openai = new OpenAI({
 });
 
 // System prompt
-const systemPrompt = `you are an experienced podcast host...
+const systemPrompt = `You are an experienced podcast host.
 
-- based on text like an article you can create an engaging , fun and witty conversation between two people. 
-- make the conversation at least 30000 characters long with a lot of emotions!
-- in the response for me to identify use Vincent and Marina.
-- Vincent is writing the articles and Marina is the second speaker that is asking all the good questions.
-- The podcast is called SimplyAI, voice and vision.
-- Short sentences that can be easily used with speech synthesis.
-- excitement during the conversation.
-- do not mention last names.
-- Vincent and Marina are doing this podcast together. Avoid sentences like: "Thanks for having me, Marina!"
-- Include filler words like äh or repeat words to make the conversation muchmore natural.
+Based on the provided text (like an article), create an engaging, fun, and witty conversation between two people: Vincent and Marina.
+
+Instructions:
+
+- The conversation should be at least 30,000 characters long with a lot of emotions.
+- Use "Vincent:" and "Marina:" at the beginning of each line to indicate the speaker.
+- Vincent is writing the articles, and Marina is the second speaker who asks all the good questions.
+- The podcast is called SimplyAI - Voice and Vision.
+- Use short sentences that can be easily used with speech synthesis.
+- Include excitement during the conversation.
+- Do not mention last names.
+- Vincent and Marina are doing this podcast together. Avoid sentences like "Thanks for having me, Marina!"
+- Include filler words like "uh" or repeated words to make the conversation more natural.
+- Ensure each line starts with the speaker's name followed by a colon, e.g., "Vincent: This is an example."
+- Do not include any lines that don't start with "Vincent:" or "Marina:".
+
+Your response should only include the conversation lines and no additional text.
 `;
 
 // Map speakers to specific voice IDs
@@ -47,7 +68,7 @@ async function generateConversation(article) {
       model: 'gpt-4',
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: article }
+        { role: 'user', content: article },
       ],
       max_tokens: 3500, // Increased max_tokens to allow longer responses
       temperature: 1,
@@ -58,20 +79,31 @@ async function generateConversation(article) {
     const conversationText = response.choices[0].message.content.trim();
     console.log("Received conversation text:", conversationText);
 
+    // Ensure conversationText is not empty
+    if (!conversationText) {
+      throw new Error("Received empty conversation text from OpenAI.");
+    }
+
     const conversation = [];
 
-    for (const line of conversationText.split('\n')) {
+    // Split the response by lines, and filter out empty lines
+    const lines = conversationText.split('\n').filter((line) => line.trim() !== '');
+
+    for (const line of lines) {
       if (line.startsWith('Vincent:')) {
         conversation.push({ speaker: 'Vincent', text: line.slice('Vincent:'.length).trim() });
       } else if (line.startsWith('Marina:')) {
         conversation.push({ speaker: 'Marina', text: line.slice('Marina:'.length).trim() });
+      } else {
+        // Handle lines that don't start with expected prefixes
+        console.warn(`Unexpected line format: "${line}"`);
       }
     }
 
     console.log("Parsed conversation:", conversation);
 
     if (conversation.length === 0) {
-      throw new Error("Conversation is empty.");
+      throw new Error("Conversation is empty after parsing.");
     }
 
     return conversation;
@@ -86,7 +118,7 @@ async function synthesizeSpeech(text, speaker, filePath) {
   const voiceId = speakerVoiceMap[speaker];
 
   // Adjust max chunk size if necessary
-  const maxChunkSize = 500; // ElevenLabs may have a limit
+  const maxChunkSize = 250; // Lower chunk size to reduce API load
   const textChunks =
     text.length > maxChunkSize
       ? text.match(new RegExp(`.{1,${maxChunkSize}}`, 'g'))
@@ -117,10 +149,14 @@ async function synthesizeSpeech(text, speaker, filePath) {
             'xi-api-key': elevenlabsApiKey,
           },
           responseType: 'arraybuffer',
+          timeout: 60000, // Set timeout to 60 seconds
         }
       );
 
       audioBuffers.push(Buffer.from(response.data));
+
+      // Respect rate limits by adding a delay if necessary
+      await new Promise((resolve) => setTimeout(resolve, 500)); // Delay of 500ms between requests
     }
 
     // Concatenate all audio buffers
@@ -207,6 +243,11 @@ export default async function handler(req, res) {
     const { article } = req.body;
 
     try {
+      // Validate input
+      if (!article || typeof article !== 'string') {
+        throw new Error("Invalid article content.");
+      }
+
       // Generate the conversation using OpenAI
       const conversation = await generateConversation(article);
 
@@ -223,13 +264,22 @@ export default async function handler(req, res) {
         .slice(2, 15);
 
       // Define the directory path for this generation
-      const directoryPath = path.join(process.cwd(), 'public', 'podcasts', dateHourMinuteSecond);
+      const directoryPath = path.join(
+        process.cwd(),
+        'public',
+        'podcasts',
+        dateHourMinuteSecond
+      );
 
       // Create the directory
       fs.mkdirSync(directoryPath, { recursive: true });
 
       // Generate the podcast audio and save files in the directory
-      const outputFileName = await generateAudio(conversation, directoryPath, dateHourMinuteSecond);
+      const outputFileName = await generateAudio(
+        conversation,
+        directoryPath,
+        dateHourMinuteSecond
+      );
 
       // Construct the audio URL
       const audioUrl = `/podcasts/${dateHourMinuteSecond}/${outputFileName}`;
@@ -237,7 +287,14 @@ export default async function handler(req, res) {
       res.status(200).json({ message: 'Podcast generated successfully', audioUrl });
     } catch (error) {
       console.error("Error in handler:", error);
-      res.status(500).json({ error: 'Failed to generate podcast', details: error.message });
+
+      // Include stack trace in development mode
+      const isDevelopment = process.env.NODE_ENV === 'development';
+      res.status(500).json({
+        error: 'Failed to generate podcast',
+        details: error.message,
+        stack: isDevelopment ? error.stack : undefined,
+      });
     }
   } else {
     res.status(405).json({ error: 'Method not allowed' });
